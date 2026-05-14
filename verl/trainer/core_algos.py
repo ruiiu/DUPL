@@ -21,13 +21,16 @@ implement PPO
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional, Tuple, Union
+import re
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
 from ..utils import torch_functional as VF
+
+from mathruler.grader import extract_boxed_content
 
 
 if TYPE_CHECKING:
@@ -80,7 +83,8 @@ class AdvantageEstimator(str, Enum):
 
     GAE = "gae"
     GRPO = "grpo"
-    GRPO_PASSK = "grpo_passk"
+    GRPO_EXPLORATION = "grpo_exploration"
+    GRPO_DUPL = "grpo_dupl"
     REINFORCE_PLUS_PLUS = "reinforce_plus_plus"
     REMAX = "remax"
     RLOO = "rloo"
@@ -216,53 +220,185 @@ def compute_grpo_outcome_advantage(
     return returns, returns
 
 
-@register_adv_estimator(AdvantageEstimator.GRPO_PASSK)
-def compute_grpo_passk_outcome_advantage(
-    token_level_rewards: torch.Tensor, response_mask: torch.Tensor, index: torch.Tensor, eps: float = 1e-6, **kwargs
+@register_adv_estimator(AdvantageEstimator.GRPO_EXPLORATION)
+def compute_grpo_outcome_advantage_with_exploration(
+    token_level_rewards: torch.Tensor,
+    response_mask: torch.Tensor,
+    index,
+    response_texts: List[str] = None,
+    ground_truths: List[str] = None,
+    beta: float = 0.1,
+    gamma: float = 0.1,
+    use_ngram_diversity: bool = True,
+    use_prediction_consistency: bool = True,
+    ngram_size: int = 2,
+    eps: float = 1e-6,
+    log_probs: torch.Tensor = None,
+    alpha: float = 0.4,
+    kappa: float = 2.0,
+    use_entropy_shaping: bool = False,
+    **kwargs,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
-    Compute advantage for Pass@k using a GRPO-style outcome reward formulation.
-    Only the best response per group gets a non-zero advantage: r_max - r_second_max.
-
-    Implemented as described in https://arxiv.org/abs/2503.19595.
-
-    Args:
-        token_level_rewards: `(torch.Tensor)`
-            shape: (bs, response_length)
-        response_mask: `(torch.Tensor)`
-            shape: (bs, response_length)
-        index: `(torch.Tensor)`
-            shape: (bs,)
-        eps: `(float)`
-            epsilon value to avoid division by zero
-
-    Returns:
-        advantages: `(torch.Tensor)`
-            shape: (bs, response_length)
-        returns: `(torch.Tensor)`
-            shape: (bs, response_length)
-
+    Compute advantage for GRPO with exploration bonuses and optionally entropy-based advantage shaping.
     """
-    scores = token_level_rewards.sum(dim=-1)
-    advantages = torch.zeros_like(scores)
-    id2score = defaultdict(list)
-    id2indices = defaultdict(list)
+    if response_texts is not None and ground_truths is not None:
+        scores = compute_grpo_enhanced_rewards(
+            token_level_rewards=token_level_rewards,
+            response_texts=response_texts,
+            ground_truths=ground_truths,
+            index=index,
+            beta=beta,
+            gamma=gamma,
+            use_ngram_diversity=use_ngram_diversity,
+            use_prediction_consistency=use_prediction_consistency,
+            ngram_size=ngram_size,
+            correctness_threshold=0.5,
+        )
+    else:
+        scores = token_level_rewards.sum(dim=-1)
 
+    id2score = defaultdict(list)
+    id2mean, id2std = {}, {}
     bsz = scores.shape[0]
     for i in range(bsz):
         id2score[index[i]].append(scores[i])
-        id2indices[index[i]].append(i)
-
     for idx in id2score:
         assert len(id2score[idx]) > 1, "GRPO needs rollout.n > 1."
-        rewards = torch.tensor(id2score[idx])
-        topk, topk_idx = torch.topk(rewards, k=2)
-        r_max, r_second_max = topk[0], topk[1]
-        i_max = id2indices[idx][topk_idx[0]]
-        advantages[i_max] = (r_max - r_second_max) / (torch.std(torch.tensor(id2score[idx])) + eps)
+        id2mean[idx] = torch.mean(torch.tensor(id2score[idx]))
+        id2std[idx] = torch.std(torch.tensor(id2score[idx]))
+    for i in range(bsz):
+        scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + eps)
 
-    returns = advantages.unsqueeze(-1) * response_mask
-    return returns, returns
+    returns = scores.unsqueeze(-1) * response_mask
+    advantages = returns
+
+    if use_entropy_shaping and log_probs is not None:
+        entropy = compute_token_entropy(log_probs, response_mask)
+        entropy_shaping_term = compute_entropy_advantage_shaping(advantages, entropy, response_mask, alpha, kappa)
+        advantages = advantages + entropy_shaping_term
+
+    return advantages, returns
+
+
+@torch.no_grad()
+def compute_grpo_outcome_advantage_dupl(
+    token_level_rewards: torch.Tensor,
+    response_mask: torch.Tensor,
+    index: torch.Tensor,
+    raw_log_probs: Optional[torch.Tensor] = None,
+    aug_log_probs: Optional[torch.Tensor] = None,
+    use_augmented_branch: Union[bool, torch.Tensor] = True,
+    eps: float = 1e-6,
+    alpha: float = 0.4,
+    kappa: float = 2.0,
+    use_entropy_shaping: bool = False,
+    kl_penalty_weight: float = 0.1,
+    current_step: int = 0,
+    total_training_steps: int = 200,
+    exploration_ratio: float = 0.45,
+    transition_ratio: float = 0.23,
+    enable_kl_transition: bool = False,
+    use_kl_penalty: bool = True,
+    use_forward_kl_only: bool = False,
+) -> Tuple[torch.Tensor, torch.Tensor, Dict[str, Any]]:
+    """
+    Compute GRPO outcome-based advantages with DUPL (dual-path uncertainty learning) and curriculum KL penalty.
+    """
+    scores = token_level_rewards.sum(dim=-1)
+    id2score = defaultdict(list)
+    id2mean, id2std = {}, {}
+    bsz = scores.shape[0]
+    for i in range(bsz):
+        id2score[index[i]].append(scores[i])
+    for idx in id2score:
+        assert len(id2score[idx]) > 1, "GRPO needs rollout.n > 1."
+        id2mean[idx] = torch.mean(torch.tensor(id2score[idx]))
+        id2std[idx] = torch.std(torch.tensor(id2score[idx]))
+    for i in range(bsz):
+        scores[i] = (scores[i] - id2mean[index[i]]) / (id2std[index[i]] + eps)
+
+    returns = scores.unsqueeze(-1) * response_mask
+    advantages = returns
+    metadata = {}
+
+    kl_penalty = torch.zeros_like(advantages)
+    if use_kl_penalty and raw_log_probs is not None and aug_log_probs is not None:
+        raw_probs = torch.exp(raw_log_probs)
+        aug_probs = torch.exp(aug_log_probs)
+        forward_kl = F.kl_div(torch.log(aug_probs + 1e-8), raw_probs, reduction='none')
+
+        if use_forward_kl_only:
+            kl_penalty = forward_kl
+        else:
+            inverse_kl = F.kl_div(torch.log(raw_probs + 1e-8), aug_probs, reduction='none')
+            kl_penalty = (forward_kl + inverse_kl) / 2.0
+
+        kl_penalty = kl_penalty.detach() * response_mask
+        metadata["kl_penalty"] = kl_penalty.mean().item()
+        metadata["kl_penalty_std"] = kl_penalty.std().item()
+
+        if isinstance(use_augmented_branch, torch.Tensor):
+            use_augmented_mask = use_augmented_branch.float().unsqueeze(-1)
+        else:
+            use_augmented_mask = float(use_augmented_branch)
+
+        should_apply_kl = use_augmented_branch.any().item() if isinstance(use_augmented_branch, torch.Tensor) else use_augmented_branch
+
+        if should_apply_kl:
+            exploration_steps = int(total_training_steps * exploration_ratio)
+            transition_steps = int(total_training_steps * transition_ratio)
+
+            if not enable_kl_transition:
+                kl_multiplier = 1.0
+                metadata["kl_penalty_mode"] = "exploration_fixed"
+            elif current_step < exploration_steps:
+                kl_multiplier = 1.0
+                metadata["kl_penalty_mode"] = "exploration"
+            elif current_step < exploration_steps + transition_steps:
+                transition_progress = (current_step - exploration_steps) / max(transition_steps, 1)
+                kl_multiplier = 1.0 - 2.0 * transition_progress
+                metadata["kl_penalty_mode"] = "transition"
+            else:
+                kl_multiplier = -1.0
+                metadata["kl_penalty_mode"] = "consistency"
+
+            kl_term = kl_penalty_weight * kl_multiplier * kl_penalty
+            advantage_magnitude_term = torch.abs(advantages) / 2.0
+            kl_penalty_contribution = torch.min(torch.abs(kl_term), advantage_magnitude_term) * torch.sign(kl_term)
+            kl_penalty_contribution = kl_penalty_contribution * use_augmented_mask
+            advantages = advantages + kl_penalty_contribution
+
+            metadata["current_step"] = current_step
+            metadata["total_training_steps"] = total_training_steps
+            if enable_kl_transition:
+                metadata["kl_multiplier"] = kl_multiplier
+            metadata["kl_contribution_mean"] = kl_penalty_contribution.mean().item()
+            metadata["kl_contribution_std"] = kl_penalty_contribution.std().item()
+
+    if raw_log_probs is not None:
+        raw_entropy = compute_token_entropy(raw_log_probs, response_mask)
+    else:
+        raw_entropy = None
+    if aug_log_probs is not None:
+        aug_entropy = compute_token_entropy(aug_log_probs, response_mask)
+    else:
+        aug_entropy = None
+
+    if use_entropy_shaping:
+        if isinstance(use_augmented_branch, torch.Tensor):
+            if aug_entropy is not None and raw_entropy is not None:
+                entropy = torch.where(use_augmented_branch.unsqueeze(-1), aug_entropy, raw_entropy)
+            else:
+                entropy = aug_entropy if aug_entropy is not None else raw_entropy
+        else:
+            entropy = aug_entropy if use_augmented_branch else raw_entropy
+
+        if entropy is not None:
+            entropy_shaping_term = compute_entropy_advantage_shaping(advantages, entropy, response_mask, alpha, kappa)
+            advantages = advantages + entropy_shaping_term
+
+    return advantages, returns, metadata
 
 
 @register_adv_estimator(AdvantageEstimator.RLOO)
@@ -597,3 +733,153 @@ def compute_kl(
         return F.kl_div(ref_log_probs, log_probs, log_target=True, reduction="none").sum(-1)
 
     raise NotImplementedError(f"Unknown KL penalty: {kl_penalty}.")
+
+
+@torch.no_grad()
+def compute_token_entropy(
+    log_probs: torch.Tensor,
+    response_mask: torch.Tensor,
+) -> torch.Tensor:
+    """
+    Compute per-token entropy directly from log probabilities of generated tokens.
+    H = -P * log(P)
+    """
+    probs = torch.exp(log_probs)
+    entropy = -probs * log_probs
+    entropy = entropy * response_mask
+    return entropy
+
+
+@torch.no_grad()
+def compute_entropy_advantage_shaping(
+    advantages: torch.Tensor,
+    entropy: torch.Tensor,
+    response_mask: torch.Tensor,
+    alpha: float = 0.4,
+    kappa: float = 2.0,
+) -> torch.Tensor:
+    """
+    Compute entropy-based advantage shaping term:
+    psi(H_t) = min(alpha * H_t^detach, |A_t| / kappa)
+    """
+    entropy_detached = entropy.detach()
+    entropy_term = alpha * entropy_detached
+    advantage_magnitude_term = torch.abs(advantages) / kappa
+    psi = torch.min(entropy_term, advantage_magnitude_term)
+    psi = psi * response_mask
+    return psi
+
+
+def tokenize_response(response: str, exclude_final_prediction: bool = True) -> List[str]:
+    """Tokenize response into words for n-gram analysis."""
+    if exclude_final_prediction:
+        response = re.sub(r'\\boxed\{[^}]*\}$', '', response.strip())
+    text = re.sub(r"<think>|</think>|\\boxed\{[^}]*\}", " ", response)
+    text = re.sub(r"[^\w\s]", " ", text.lower())
+    tokens = text.split()
+    return [token for token in tokens if token.strip()]
+
+
+def generate_ngrams(tokens: List[str], n: int) -> List[Tuple[str, ...]]:
+    """Generate n-grams from a list of tokens."""
+    if len(tokens) < n:
+        return []
+    return [tuple(tokens[i:i+n]) for i in range(len(tokens) - n + 1)]
+
+
+def compute_ngram_diversity_reward(responses: List[str], n: int = 2, exclude_final_prediction: bool = True) -> float:
+    """Calculate N-gram diversity reward across all responses."""
+    if not responses:
+        return 0.0
+    if len(set(responses)) == 1:
+        return 0.0
+    all_ngrams = []
+    for response in responses:
+        tokens = tokenize_response(response, exclude_final_prediction=exclude_final_prediction)
+        ngrams = generate_ngrams(tokens, n)
+        all_ngrams.extend(ngrams)
+    if not all_ngrams:
+        return 0.0
+    unique_ngrams = len(set(all_ngrams))
+    total_ngrams = len(all_ngrams)
+    return unique_ngrams / total_ngrams
+
+
+def compute_prediction_consistency_reward(responses: List[str], ground_truths: List[str]) -> List[float]:
+    """Calculate prediction consistency reward for each response."""
+    if len(responses) <= 1:
+        return [0.0] * len(responses)
+    answers = []
+    for response in responses:
+        answer = extract_boxed_content(response)
+        answers.append(answer)
+    consistency_rewards = []
+    K = len(responses)
+    for i, answer_i in enumerate(answers):
+        different_count = sum(1 for j, answer_j in enumerate(answers) if j != i and answer_j != answer_i)
+        consistency_reward = different_count / (K - 1) if K > 1 else 0.0
+        consistency_rewards.append(consistency_reward)
+    return consistency_rewards
+
+
+def compute_grpo_enhanced_rewards(
+    token_level_rewards: torch.Tensor,
+    response_texts: List[str],
+    ground_truths: List[str],
+    index,
+    beta: float = 0.1,
+    gamma: float = 0.1,
+    use_ngram_diversity: bool = True,
+    use_prediction_consistency: bool = True,
+    ngram_size: int = 2,
+    correctness_threshold: float = 0.5,
+) -> torch.Tensor:
+    """Compute enhanced rewards (task rewards + exploration bonuses) for GRPO training."""
+    task_rewards = token_level_rewards.sum(dim=-1)
+    id2responses = defaultdict(list)
+    id2ground_truths = defaultdict(list)
+    id2indices = defaultdict(list)
+    id2task_rewards = defaultdict(list)
+    bsz = task_rewards.shape[0]
+    for i in range(bsz):
+        problem_id = index[i].item() if hasattr(index[i], 'item') else index[i]
+        id2responses[problem_id].append(response_texts[i])
+        id2ground_truths[problem_id].append(ground_truths[i])
+        id2indices[problem_id].append(i)
+        id2task_rewards[problem_id].append(task_rewards[i].item())
+
+    exploration_bonuses = torch.zeros_like(task_rewards)
+    for problem_id in id2responses:
+        responses = id2responses[problem_id]
+        group_ground_truths = id2ground_truths[problem_id]
+        indices = id2indices[problem_id]
+        group_task_rewards = id2task_rewards[problem_id]
+        if len(responses) <= 1:
+            continue
+
+        correct_indices = []
+        for j, idx in enumerate(indices):
+            if group_task_rewards[j] > correctness_threshold:
+                correct_indices.append(idx)
+
+        ngram_diversity_reward = 0.0
+        if use_ngram_diversity and len(responses) > 1 and len(set(responses)) > 1:
+            ngram_diversity_reward = compute_ngram_diversity_reward(responses, n=ngram_size, exclude_final_prediction=True)
+
+        consistency_rewards = [0.0] * len(responses)
+        if use_prediction_consistency and len(responses) > 1:
+            consistency_rewards = compute_prediction_consistency_reward(responses, group_ground_truths)
+
+        for correct_idx in correct_indices:
+            exploration_bonus = 0.0
+            if use_ngram_diversity and len(responses) > 1:
+                exploration_bonus += beta * ngram_diversity_reward
+            if use_prediction_consistency and len(responses) > 1:
+                original_position = indices.index(correct_idx)
+                exploration_bonus += gamma * consistency_rewards[original_position]
+            exploration_bonuses[correct_idx] = exploration_bonus
+
+    enhanced_rewards = task_rewards + exploration_bonuses
+    return enhanced_rewards
+
+

@@ -44,6 +44,7 @@ from ..utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_
 from ..workers.fsdp_workers import FSDPWorker
 from ..workers.reward import AutoRewardManager
 from .config import PPOConfig
+from . import core_algos
 from .core_algos import (
     AdvantageEstimator,
     FixedKLController,
@@ -134,22 +135,90 @@ def apply_kl_penalty(data: DataProto, kl_ctrl: KLController, kl_penalty="kl"):
     return data, metrics
 
 
-def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma: float = 1.0, lam: float = 1.0):
+def compute_advantage(data: DataProto, adv_estimator: AdvantageEstimator, gamma: float = 1.0, lam: float = 1.0,
+        config=None, tokenizer=None, alpha: float = 0.4, kappa: float = 2.0, use_entropy_shaping: bool = False):
     """Compute advantage estimates for policy optimization."""
-    adv_inputs = {
-        "token_level_rewards": data.batch["token_level_rewards"],
-        "response_mask": data.batch["response_mask"],
-        "index": data.non_tensor_batch["uid"],
-        "gamma": gamma,
-        "lam": lam,
-    }
-    if "values" in data.batch:
-        adv_inputs["values"] = data.batch["values"]
+    token_level_rewards = data.batch["token_level_rewards"]
+    response_mask = data.batch["response_mask"]
+    index = data.non_tensor_batch["uid"]
 
-    if "reward_baselines" in data.batch:
-        adv_inputs["reward_baselines"] = data.batch["reward_baselines"]
+    log_probs = data.batch.get("old_log_probs", None) if use_entropy_shaping else None
 
-    advantages, returns = compute_advantage_return(adv_estimator, **adv_inputs)
+    if adv_estimator == AdvantageEstimator.GRPO_EXPLORATION:
+        response_texts = None
+        ground_truths = None
+
+        if tokenizer is not None:
+            responses = data.batch["responses"]
+            response_length = response_mask.sum(dim=-1)
+            response_texts = []
+            for i in range(len(responses)):
+                valid_response_ids = responses[i][:int(response_length[i].item())]
+                response_text = tokenizer.decode(valid_response_ids, skip_special_tokens=True)
+                response_texts.append(response_text)
+            ground_truths = data.non_tensor_batch.get("ground_truth", None)
+            if ground_truths is None:
+                ground_truths = [""] * len(response_texts)
+
+        exploration_config = config.algorithm.exploration if config else None
+        if exploration_config and exploration_config.use_exploration:
+            beta = exploration_config.beta
+            gamma_explore = exploration_config.gamma
+            use_ngram_diversity = exploration_config.use_ngram_diversity
+            use_prediction_consistency = exploration_config.use_prediction_consistency
+            ngram_size = exploration_config.ngram_size
+        else:
+            beta, gamma_explore = 0.0, 0.0
+            use_ngram_diversity, use_prediction_consistency = False, False
+            ngram_size = 2
+
+        advantages, returns = core_algos.compute_grpo_outcome_advantage_with_exploration(
+            token_level_rewards=token_level_rewards, response_mask=response_mask, index=index,
+            response_texts=response_texts, ground_truths=ground_truths,
+            beta=beta, gamma=gamma_explore, use_ngram_diversity=use_ngram_diversity,
+            use_prediction_consistency=use_prediction_consistency, ngram_size=ngram_size,
+            eps=1e-6, log_probs=log_probs, alpha=alpha, kappa=kappa,
+            use_entropy_shaping=use_entropy_shaping,
+        )
+
+    elif adv_estimator == AdvantageEstimator.GRPO_DUPL:
+        raw_log_probs = data.batch.get("raw_log_probs", None)
+        aug_log_probs = data.batch.get("aug_log_probs", None)
+        use_augmented_branch = data.batch.get("use_augmented_branch", True)
+        dupl_config = getattr(config.algorithm, 'dupl', None) if config else None
+        kl_penalty_weight = dupl_config.kl_penalty_weight if dupl_config else 0.01
+
+        advantages, returns, metadata = core_algos.compute_grpo_outcome_advantage_dupl(
+            token_level_rewards=token_level_rewards, response_mask=response_mask, index=index,
+            raw_log_probs=raw_log_probs, aug_log_probs=aug_log_probs,
+            use_augmented_branch=use_augmented_branch, eps=1e-6, alpha=alpha, kappa=kappa,
+            use_entropy_shaping=use_entropy_shaping, kl_penalty_weight=kl_penalty_weight,
+            current_step=data.meta_info.get("current_step", 0),
+            total_training_steps=data.meta_info.get("dupl_config", {}).get("total_training_steps", 200),
+            exploration_ratio=dupl_config.exploration_ratio if dupl_config else 0.45,
+            transition_ratio=dupl_config.transition_ratio if dupl_config else 0.25,
+            enable_kl_transition=getattr(dupl_config, 'enable_kl_transition', False) if dupl_config else False,
+            use_kl_penalty=getattr(dupl_config, 'use_kl_penalty', True) if dupl_config else True,
+            use_forward_kl_only=getattr(dupl_config, 'use_forward_kl_only', False) if dupl_config else False,
+        )
+        if metadata:
+            for key, value in metadata.items():
+                print(f"DUPL metric {key}: {value}")
+
+    else:
+        adv_inputs = {
+            "token_level_rewards": token_level_rewards,
+            "response_mask": response_mask,
+            "index": index,
+            "gamma": gamma,
+            "lam": lam,
+        }
+        if "values" in data.batch:
+            adv_inputs["values"] = data.batch["values"]
+        if "reward_baselines" in data.batch:
+            adv_inputs["reward_baselines"] = data.batch["reward_baselines"]
+        advantages, returns = compute_advantage_return(adv_estimator, **adv_inputs)
+
     data.batch["advantages"] = advantages
     data.batch["returns"] = returns
     return data
@@ -230,10 +299,13 @@ class RayPPOTrainer:
                 )
 
         if (
-            config.algorithm.adv_estimator in (AdvantageEstimator.GRPO, AdvantageEstimator.RLOO)
+            config.algorithm.adv_estimator in (
+                AdvantageEstimator.GRPO, AdvantageEstimator.RLOO,
+                AdvantageEstimator.GRPO_EXPLORATION, AdvantageEstimator.GRPO_DUPL,
+            )
             and config.worker.rollout.n == 1
         ):
-            raise ValueError("GRPO and RLOO algorithm need `config.worker.rollout.n > 1`.")
+            raise ValueError("GRPO, RLOO, GRPO_EXPLORATION, and GRPO_DUPL algorithms need `config.worker.rollout.n > 1`.")
 
         if config.trainer.max_steps is not None:
             self.training_steps = config.trainer.max_steps
@@ -391,7 +463,6 @@ class RayPPOTrainer:
 
     def _validate(self) -> dict[str, Any]:
         reward_tensor_lst = []
-        # Lists to collect samples for the table
         sample_inputs, sample_outputs, sample_labels, sample_scores = [], [], [], []
         reward_metrics_lst = defaultdict(list)
         length_metrics_lst = defaultdict(list)
@@ -623,6 +694,44 @@ class RayPPOTrainer:
                         values = self.critic_wg.compute_values(batch)
                         batch = batch.union(values)
 
+                # DUPL: dual-path uncertainty learning
+                if self.config.algorithm.adv_estimator == AdvantageEstimator.GRPO_DUPL:
+                    dupl_config = getattr(self.config.algorithm, 'dupl', None)
+                    if dupl_config and dupl_config.enabled:
+                        batch_dupl_config = {
+                            "augmentation_strength": dupl_config.augmentation_strength,
+                            "gaussian_noise_std": dupl_config.gaussian_noise_std,
+                            "uncertainty_alpha": dupl_config.uncertainty_alpha,
+                            "uncertainty_kappa": dupl_config.uncertainty_kappa,
+                            "sampling_strategy": dupl_config.sampling_strategy,
+                            "fixed_prob": dupl_config.fixed_prob,
+                            "initial_aug_prob": dupl_config.initial_aug_prob,
+                            "final_aug_prob": dupl_config.final_aug_prob,
+                            "total_training_steps": self.training_steps,
+                            "current_step": self.global_step,
+                            "kl_penalty_weight": dupl_config.kl_penalty_weight,
+                            "top_k_for_kl": dupl_config.top_k_for_kl,
+                            "use_kl_penalty": dupl_config.use_kl_penalty,
+                            "exploration_ratio": dupl_config.exploration_ratio,
+                            "transition_ratio": dupl_config.transition_ratio,
+                            "enable_kl_transition": dupl_config.enable_kl_transition,
+                            "use_forward_kl_only": dupl_config.use_forward_kl_only,
+                        }
+                        batch.meta_info["dupl_config"] = batch_dupl_config
+
+                        with timer("dupl_uncertainty", timing_raw):
+                            dupl_data = self.actor_rollout_ref_wg.process_dual_path_batch(batch)
+                            batch = batch.union(dupl_data)
+
+                            if "visual_uncertainty" in batch.batch:
+                                visual_uncertainty_tensor = batch.batch["visual_uncertainty"]
+                                metrics.update({
+                                    "dupl/uncertainty_mean": torch.mean(visual_uncertainty_tensor).detach().item(),
+                                    "dupl/uncertainty_max": torch.max(visual_uncertainty_tensor).detach().item(),
+                                    "dupl/uncertainty_min": torch.min(visual_uncertainty_tensor).detach().item(),
+                                    "dupl/uncertainty_std": torch.std(visual_uncertainty_tensor).detach().item(),
+                                })
+
                 with timer("adv", timing_raw):
                     if "token_level_scores" not in batch.batch:
                         # get token level scores asynchronously
@@ -639,12 +748,21 @@ class RayPPOTrainer:
                     else:
                         batch.batch["token_level_rewards"] = batch.batch["token_level_scores"]
 
+                    use_entropy_shaping_config = self.config.algorithm.use_entropy_shaping
+                    if isinstance(use_entropy_shaping_config, str):
+                        use_entropy_shaping_config = use_entropy_shaping_config.lower() in ['true', '1', 'yes', 'on']
+
                     # compute advantages, executed on the driver process
                     batch = compute_advantage(
                         batch,
                         adv_estimator=self.config.algorithm.adv_estimator,
                         gamma=self.config.algorithm.gamma,
                         lam=self.config.algorithm.lam,
+                        config=self.config,
+                        tokenizer=self.tokenizer,
+                        alpha=self.config.algorithm.entropy_alpha,
+                        kappa=self.config.algorithm.entropy_kappa,
+                        use_entropy_shaping=use_entropy_shaping_config,
                     )
 
                 # update critic

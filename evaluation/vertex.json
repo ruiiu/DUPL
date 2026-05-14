@@ -1,0 +1,14 @@
+{
+  "type": "service_account",
+  "project_id": "tencent-gemini-omd01",
+  "private_key_id": "c2eab17392a5b8ceb2d389b439573ad26a33700e",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCpxIaQ1HXmZT4a\nIiyi8EZxAFuPq8dog4+6cDs7HBmXXkqn7oUMWbEneLlCdC7TAAckRCqljIpjQiRE\nC6bqtSCjc5GEOOCknKMBfcwu/I4Pc5Tmhi8eu4alDocJgtnRMnzZwHy/Ama/FJ5d\nKnR24DubKJQUf9mCfvxgJj9xNw7c57EMJ2X/o7BjecHOiKZX1fN5J97yviE+wIm/\nxubkYyMuEM+HLhQWo6fI7SV1/qe3i94OGnYmSnLD6G7IN0kjoZj3n88+JGJpxJKp\nQ3Lv/gRQPjGhOylYNqsvulirKdeKoXWhMmV9Z71FjshMMedWoAnH7ijdh4SJALgY\nD1h9QbYpAgMBAAECggEAB9TMJ6fYAndJd0Impfjd1FOhuvhqcUdJsjOAKqNgCNat\ngfP4849lon5T/sfw6wSAJSuh01OEL2el2EpjT5toXzHdv2gyRgBVwqQExGbGai8O\nP4NmxAz+0o601aWmxPAxHd2zw3SUZxxyi7YBe68Eq40ie5REOoaqFLNe+irXMYMe\nkpellvArBamyYjjGYhDK4CRcHIotc3ZdfcJR5wqjViUnGS1onhdBSMxovpYnXNj9\nHK+pVlaKzvJQ5ovnr7Ic9XgDHdo23s/1zk8/Hh0wLEGzOzz1L+bMdMeZ8JR8CVQ2\nZ2+DM7LILpm3yUDX/LtteCTPAjG1prNv1jrXYExyEwKBgQDo2DeEMlV3zw0BqGQy\nHsMnJngWY6Z9tVCnLC5fEAEV9uDbKkt8OIenCwrZlsnO1XeFyig4UqgOuQfHQT0v\nE0FtoYfnjYzY0pogXzW1jC/flvSMLxz+KzI35zlRNOlSTTVafy4EsNN0kayTgHzO\nI8Xh0VBYkddypGxG/WwiF9adSwKBgQC6pn1drkbmTMDcjT2CnipxWsgmTr1fD8vo\nRIypaq+AU89ULYjdUaMTv2uHpE5wVQe+va2QhCUJ6pNwkV3c2KjTQ0TOXjaTJJSn\nFAJ4MLtVneBcz2eJHIGP5fJIjQmGgwWU8h+0LShQUdVUmGUR8763jzpClZvJxIkM\nmot6qgYV2wKBgEuOLaWV96ni4+OP0sN4u/auQvVw7IuKFFvKuFlchh2seJZliQ0M\nAuivapvklCOrnRcq3BY6rBHq9J0xjDsEUozSh5kZk4SgAidS/cilbrts7nm2p//J\n4IfHXg/9zWBJcXCmKDaZcmQ3CPrsDJOPhBycoSe8W171/7Shcz804Q01AoGAYKrV\nhu05vxDFWfS0hK+R379apaxmG5O80YCfMScV2eqOGFS065raUOH0uP15umfvaPQn\nrg8id65LyiMfb7+uQCw4uIDG1xI9AwMz/DeQ7lij2K16O+LNn09CWhzhcA7vlyKH\nFPPGS0L2r6d1wQRyI/NEAzQkySzGpgZsco0YNb0CgYEAjETeHxD/itWyHOg6y49c\nw74Yiwk1eFMg7C3lNXd5j8tRk1+2QDhcSMJo6QdRomzyDL9DIxCWUJblVi6hJof/\nE4PH07JBaRAEnWMHjJpBzXriQ5VhWU0MRwpaHOZ2ZAoOkkiqKZIhwryBvfoZa07Q\noArMcZ4xuOoFhE9pOE6g5nE=\n-----END PRIVATE KEY-----\n",
+  "client_email": "ailab01@tencent-gemini-omd01.iam.gserviceaccount.com",
+  "client_id": "104935904768461518534",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/ailab01%40tencent-gemini-omd01.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
+  

@@ -40,6 +40,7 @@ from transformers import (
 from transformers.modeling_utils import no_init_weights
 
 from ..models.monkey_patch import apply_ulysses_patch
+from ..models.uncertainty import create_dual_path_uncertainty_estimator
 from ..protocol import DataProto
 from ..single_controller.base import Worker
 from ..single_controller.base.decorator import Dispatch, register
@@ -761,3 +762,135 @@ class FSDPWorker(Worker):
 
         output = output.to("cpu")
         return output
+
+    @register(dispatch_mode=Dispatch.DP_COMPUTE_PROTO)
+    def process_dual_path_batch(self, data: DataProto):
+        """Process batch through dual paths (raw + augmented) for DUPL KL divergence penalty."""
+        try:
+            uncertainty_config = data.meta_info.get("dupl_config", data.meta_info.get("uncertainty_config", {}))
+            use_kl_penalty = uncertainty_config.get("use_kl_penalty", True)
+            dual_path_estimator = create_dual_path_uncertainty_estimator(uncertainty_config)
+            current_step = uncertainty_config.get("current_step", 0)
+            dual_path_estimator.update_training_step(current_step)
+            batch_size = len(data)
+            device = self.fsdp_module.device
+
+            use_augmented_branch = dual_path_estimator.sample_branch_for_training()
+            raw_log_probs, aug_log_probs, visual_uncertainty = None, None, None
+
+            if use_kl_penalty:
+                raw_log_probs = self._get_log_probs_from_current_batch(data)
+                aug_log_probs = self._get_augmented_log_probs(data, dual_path_estimator)
+                response_mask = data.batch.get("response_mask", torch.ones(batch_size, raw_log_probs.shape[1], device=device))
+                kl_penalty = dual_path_estimator.compute_kl_divergence_penalty(
+                    raw_log_probs=raw_log_probs, aug_log_probs=aug_log_probs, response_mask=response_mask,
+                )
+                visual_uncertainty = kl_penalty.sum(dim=1) / (response_mask.sum(dim=1) + 1e-8)
+            else:
+                if use_augmented_branch:
+                    aug_log_probs = self._get_augmented_log_probs(data, dual_path_estimator)
+                else:
+                    raw_log_probs = self._get_log_probs_from_current_batch(data)
+                visual_uncertainty = torch.zeros(batch_size, device=device)
+
+            tensors = {
+                "visual_uncertainty": visual_uncertainty,
+                "use_augmented_branch": torch.full((batch_size,), use_augmented_branch, dtype=torch.bool, device=device),
+            }
+            if use_kl_penalty:
+                if raw_log_probs is not None:
+                    tensors["raw_log_probs"] = raw_log_probs
+                if aug_log_probs is not None:
+                    tensors["aug_log_probs"] = aug_log_probs
+            else:
+                if use_augmented_branch and aug_log_probs is not None:
+                    tensors["aug_log_probs"] = aug_log_probs
+                elif not use_augmented_branch and raw_log_probs is not None:
+                    tensors["raw_log_probs"] = raw_log_probs
+
+            return DataProto.from_dict(
+                tensors=tensors,
+                meta_info={
+                    "dupl_method": "kl_divergence" if use_kl_penalty else "simplified",
+                    "current_aug_prob": dual_path_estimator.get_current_aug_probability(),
+                    "current_step": current_step,
+                    "visual_uncertainty_mean": visual_uncertainty.mean().item(),
+                    "visual_uncertainty_std": visual_uncertainty.std().item(),
+                }
+            )
+        except Exception as e:
+            print(f"Error in DUPL processing: {e}")
+            import traceback
+            traceback.print_exc()
+            batch_size = len(data)
+            device = self.fsdp_module.device if hasattr(self, 'fsdp_module') else torch.cuda.current_device()
+            return DataProto.from_dict(
+                tensors={
+                    "visual_uncertainty": torch.zeros(batch_size, device=device),
+                    "use_augmented_branch": torch.zeros(batch_size, dtype=torch.bool, device=device),
+                },
+                meta_info={"dupl_error": str(e)}
+            )
+
+    def _get_log_probs_from_current_batch(self, data: DataProto) -> torch.Tensor:
+        """Get log probabilities from the current batch (raw images)."""
+        if "multi_modal_inputs" not in data.non_tensor_batch:
+            self._process_multi_modal_inputs(data)
+        data = data.to(torch.cuda.current_device())
+        if self._use_param_offload:
+            load_fsdp_model(self.fsdp_module)
+        original_temp = data.meta_info.get("temperature", self.config.rollout.temperature)
+        data.meta_info["temperature"] = self.config.rollout.temperature
+        with self.ulysses_sharding_manager:
+            data = self.ulysses_sharding_manager.preprocess_data(data)
+            log_probs = self.actor.compute_log_prob(data=data)
+            data = self.ulysses_sharding_manager.postprocess_data(DataProto.from_dict(
+                tensors={"log_probs": log_probs},
+                meta_info={"temperature": self.config.rollout.temperature}
+            ))
+            log_probs = data.batch["log_probs"]
+        data.meta_info["temperature"] = original_temp
+        if self._use_param_offload:
+            offload_fsdp_model(self.fsdp_module)
+        return log_probs
+
+    def _get_augmented_log_probs(self, data: DataProto, dual_path_estimator) -> torch.Tensor:
+        """Get log probabilities from augmented images."""
+        multi_modal_data = data.non_tensor_batch.get("multi_modal_data", [])
+        batch_size = len(data)
+        try:
+            if multi_modal_data is None or (hasattr(multi_modal_data, '__len__') and len(multi_modal_data) == 0):
+                return self._get_log_probs_from_current_batch(data)
+        except (TypeError, ValueError):
+            pass
+
+        augmented_multi_modal_inputs = []
+        for i in range(batch_size):
+            if i < len(multi_modal_data) and multi_modal_data[i] and "images" in multi_modal_data[i]:
+                image_data_list = multi_modal_data[i]["images"]
+                if not isinstance(image_data_list, list):
+                    image_data_list = [image_data_list]
+                min_pixels = data.meta_info.get("min_pixels", None)
+                max_pixels = data.meta_info.get("max_pixels", None)
+                augmented_images = []
+                for image_data in image_data_list:
+                    if isinstance(image_data, dict) and "bytes" in image_data:
+                        pil_image = process_image(image_data, min_pixels, max_pixels)
+                        aug_image = dual_path_estimator.create_augmented_image(pil_image)
+                        augmented_images.append(aug_image)
+                if augmented_images:
+                    aug_inputs = self.processor.image_processor(images=augmented_images[0], return_tensors="pt")
+                    aug_inputs = {k: v.to(torch.cuda.current_device()) for k, v in dict(aug_inputs).items()}
+                    augmented_multi_modal_inputs.append(aug_inputs)
+                else:
+                    augmented_multi_modal_inputs.append(data.non_tensor_batch["multi_modal_inputs"][i])
+            else:
+                augmented_multi_modal_inputs.append(data.non_tensor_batch["multi_modal_inputs"][i])
+
+        tensors_dict = dict(data.batch) if data.batch is not None else {}
+        aug_data = DataProto.from_dict(
+            tensors=tensors_dict,
+            non_tensors={**data.non_tensor_batch, "multi_modal_inputs": np.array(augmented_multi_modal_inputs, dtype=object)},
+            meta_info=data.meta_info,
+        )
+        return self._get_log_probs_from_current_batch(aug_data)

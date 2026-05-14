@@ -34,7 +34,7 @@ def accuracy_reward(response: str, ground_truth: str) -> float:
     return 1.0 if grade_answer(answer, ground_truth) else 0.0
 
 
-def compute_score(reward_inputs: list[dict[str, Any]], format_weight: float = 0.1) -> list[dict[str, float]]:
+def compute_score(reward_inputs: list[dict[str, Any]], format_weight: float = 0.0) -> list[dict[str, float]]:
     scores = []
     for reward_input in reward_inputs:
         response = re.sub(r"\s*(<|>|/)\s*", r"\1", reward_input["response"])  # handle qwen2.5vl-32b format

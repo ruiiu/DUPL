@@ -71,6 +71,8 @@ def process_image(
         width, height = int(image.width * resize_factor), int(image.height * resize_factor)
         image = image.resize((width, height))
 
+    if image.mode == "P" and "transparency" in image.info:
+        image = image.convert("RGBA")
     if image.mode != "RGB":
         image = image.convert("RGB")
 
@@ -154,6 +156,12 @@ class RLHFDataset(Dataset):
                 num_proc=filter_overlong_prompts_workers,
             )
 
+        self.dataset = self.dataset.filter(
+            self._filter_bad_answers,
+            desc="Filtering bad answers",
+            num_proc=16,
+        )
+
     def _build_messages(self, example: dict[str, Any]) -> list[dict[str, Any]]:
         prompt_str: str = example[self.prompt_key]
         if self.format_prompt:
@@ -215,6 +223,15 @@ class RLHFDataset(Dataset):
         else:
             input_ids = self.tokenizer.apply_chat_template(messages, add_generation_prompt=True)
             return len(input_ids) <= self.max_prompt_length
+
+    def _filter_bad_answers(self, example: dict[str, Any]) -> bool:
+        """Filter out samples with unwanted answer patterns."""
+        answer_str = str(example[self.answer_key]).lower()
+        bad_patterns = ["answering does not require reading text in the image", "unanswerable"]
+        for pattern in bad_patterns:
+            if pattern.lower() in answer_str:
+                return False
+        return True
 
     def __len__(self):
         return len(self.dataset)

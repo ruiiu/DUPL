@@ -63,13 +63,73 @@ class DataConfig:
 
 
 @dataclass
+class ExplorationConfig:
+    """Configuration for exploration bonuses in GRPO training"""
+    use_exploration: bool = False
+    """whether to enable exploration bonuses (automatically sets adv_estimator to grpo_exploration)"""
+    beta: float = 0.1
+    """scaling factor for n-gram diversity exploration reward"""
+    gamma: float = 0.1
+    """scaling factor for prediction consistency exploration reward"""
+    use_ngram_diversity: bool = True
+    """whether to include n-gram diversity reward"""
+    use_prediction_consistency: bool = True
+    """whether to include prediction consistency reward"""
+    ngram_size: int = 2
+    """size of n-grams for diversity calculation (2=bigrams, 3=trigrams, etc.)"""
+
+
+@dataclass
+class DuplConfig:
+    """Configuration for DUPL (dual-path uncertainty learning)"""
+    enabled: bool = False
+    """whether to enable DUPL"""
+
+    augmentation_strength: float = 0.1
+    """strength of image augmentations (0.0 to 1.0)"""
+    gaussian_noise_std: float = 0.1
+    """standard deviation for Gaussian noise"""
+    uncertainty_alpha: float = 0.3
+    """scaling factor for uncertainty bonus in advantage shaping"""
+    uncertainty_kappa: float = 2.5
+    """denominator for advantage magnitude normalization"""
+    sampling_strategy: str = "fixed"
+    """sampling strategy: 'fixed' (constant probability) or 'adaptive' (curriculum learning)"""
+    fixed_prob: float = 0.5
+    """fixed sampling probability"""
+    initial_aug_prob: float = 1.0
+    """initial probability of sampling from augmented branch"""
+    final_aug_prob: float = 0.0
+    """final probability of sampling from augmented branch"""
+
+    kl_penalty_weight: float = 1.0
+    """weight for KL divergence penalty"""
+    top_k_for_kl: int = 100
+    """number of top-k probabilities for KL computation"""
+    exploration_ratio: float = 0.45
+    """ratio of total training steps to use for exploration phase (add KL penalty)"""
+    transition_ratio: float = 0.25
+    """ratio of total training steps to use for gradual transition"""
+    enable_kl_transition: bool = False
+    """if True, KL multiplier transitions from +1 to -1; if False, stays at +1"""
+    use_kl_penalty: bool = True
+    """if True, compute and apply KL divergence penalty"""
+    use_forward_kl_only: bool = False
+    """if True, use only forward KL for exploration"""
+
+
+@dataclass
 class AlgorithmConfig:
     gamma: float = 1.0
     """discount factor for ppo gae advantage estimator"""
     lam: float = 1.0
     """lambda value for ppo gae advantage estimator"""
     adv_estimator: str = "grpo"
-    """advantage estimator, support `gae`, `grpo`, `reinforce_plus_plus`, `remax`, `rloo`"""
+    """advantage estimator, support `gae`, `grpo`, `grpo_exploration`, `grpo_dupl`, `reinforce_plus_plus`, `remax`, `rloo`"""
+    exploration: ExplorationConfig = field(default_factory=ExplorationConfig)
+    """configuration for exploration bonuses (used with grpo_exploration)"""
+    dupl: DuplConfig = field(default_factory=DuplConfig)
+    """configuration for DUPL dual-path uncertainty learning (used with grpo_dupl)"""
     disable_kl: bool = False
     """disable reference model"""
     use_kl_loss: bool = False
@@ -92,15 +152,43 @@ class AlgorithmConfig:
     """filter out low reward samples if online filtering"""
     filter_high: float = 0.99
     """filter out high reward samples if online filtering"""
+    use_entropy_shaping: bool = False
+    """enable entropy-based advantage shaping for GRPO"""
+    entropy_alpha: float = 0.4
+    """scaling factor for entropy term in advantage shaping"""
+    entropy_kappa: float = 2.0
+    """denominator for advantage magnitude term in advantage shaping"""
+
+    def post_init(self):
+        """Post-initialization to automatically configure advantage estimator based on exploration and DUPL settings"""
+        if self.exploration.use_exploration:
+            if self.adv_estimator == "grpo":
+                self.adv_estimator = "grpo_exploration"
+                print(f"INFO: Automatically set adv_estimator to 'grpo_exploration' because exploration is enabled")
+            elif self.adv_estimator not in ["grpo_exploration"]:
+                print(f"WARNING: Exploration bonuses are enabled but adv_estimator is '{self.adv_estimator}'.")
+        else:
+            if self.adv_estimator == "grpo_exploration":
+                self.adv_estimator = "grpo"
+                print(f"INFO: Automatically set adv_estimator to 'grpo' because exploration is disabled")
+
+        if self.dupl.enabled:
+            if self.adv_estimator == "grpo":
+                self.adv_estimator = "grpo_dupl"
+                print(f"INFO: Automatically set adv_estimator to 'grpo_dupl' because DUPL is enabled")
+        else:
+            if self.adv_estimator == "grpo_dupl":
+                self.adv_estimator = "grpo"
+                print(f"INFO: Automatically set adv_estimator to 'grpo' because DUPL is disabled")
 
 
 @dataclass
 class TrainerConfig:
-    total_epochs: int = 15
+    total_epochs: Optional[int] = None
     """total epochs for training"""
-    max_steps: Optional[int] = None
+    max_steps: int = 200
     """max steps for training, if specified, total_epochs is ignored"""
-    project_name: str = "easy_r1"
+    project_name: str = "DUPL"
     """project name for logger"""
     experiment_name: str = "demo"
     """experiment name for logger"""

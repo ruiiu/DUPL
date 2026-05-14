@@ -21,7 +21,7 @@ data:
   filter_overlong_prompts: true
 
 algorithm:
-  adv_estimator: grpo
+  adv_estimator: grpo  # Options: grpo, grpo_exploration, grpo_dupl
   disable_kl: false
   use_kl_loss: true
   kl_penalty: low_var_kl
@@ -30,6 +30,39 @@ algorithm:
   filter_key: overall
   filter_low: 0.01
   filter_high: 0.99
+
+  # EXPLORATION BONUS CONFIGURATION
+  exploration:
+    use_exploration: false
+    beta: 0.1
+    gamma: 0.15
+    use_ngram_diversity: false
+    use_prediction_consistency: false
+    ngram_size: 2
+
+  # ENTROPY-BASED ADVANTAGE SHAPING CONFIGURATION
+  use_entropy_shaping: false
+  entropy_alpha: 0.4
+  entropy_kappa: 2.0
+
+  # DUPL (DUAL-PATH UNCERTAINTY LEARNING) CONFIGURATION
+  dupl:
+    enabled: false
+    augmentation_strength: 1.0
+    gaussian_noise_std: 0.2
+    uncertainty_alpha: 0.3
+    uncertainty_kappa: 2.5
+    sampling_strategy: "adaptive"
+    fixed_prob: 0.5
+    initial_aug_prob: 1.0
+    final_aug_prob: 0.0
+    kl_penalty_weight: 1.0
+    top_k_for_kl: 100
+    exploration_ratio: 0.45
+    transition_ratio: 0.25
+    enable_kl_transition: false
+    use_kl_penalty: true
+    use_forward_kl_only: false
 
 worker:
   actor:
@@ -90,9 +123,9 @@ worker:
     reward_function: ./examples/reward_function/math.py:compute_score
 
 trainer:
-  total_epochs: 15
-  max_steps: null
-  project_name: easy_r1
+  total_epochs: null
+  max_steps: 200
+  project_name: DUPL
   experiment_name: qwen2_5_7b_math_grpo
   logger: ["file", "wandb"]
   nnodes: 1
@@ -104,7 +137,7 @@ trainer:
   val_generations_to_log: 3
   save_freq: 5  # -1 to disable
   save_limit: 3  # -1 to disable
-  save_model_only: false
+  save_model_only: true
   save_checkpoint_path: null
   load_checkpoint_path: null
   find_last_checkpoint: true
