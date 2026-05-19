@@ -8,6 +8,7 @@ python3 -m verl.trainer.main \
     config=examples/config.yaml \
     data.train_files=hiyouga/geometry3k@train \
     data.val_files=hiyouga/geometry3k@test \
+    data.format_prompt=./examples/format_prompt/math_qwen3.jinja \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.actor.model.lora.rank=64 \
     worker.actor.optim.lr=1e-5 \

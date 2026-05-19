@@ -2,7 +2,7 @@
 
 # export CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7  # adjust according to your GPU configuration
 
-export QWEN_LOCAL_URL="http://28.7.194.41:8000/v1/chat/completions"
+export QWEN_LOCAL_URL="http://29.127.68.253:8000/v1/chat/completions"
 export MODEL="Qwen/Qwen2.5-72B-Instruct"
 
 export http_proxy="http://star-proxy.oa.com:3128"
@@ -28,33 +28,33 @@ OVERWRITE=false  # Set to true to re-run inference/evaluation even if results ex
 # ========================
 
 HF_MODEL_PATHS=(
-  "xyliu6/NoisyRollout-Geo3k-7B"
-  "xyliu6/NoisyRollout-MMK12-6.4K-7B"
+  # "xyliu6/NoisyRollout-Geo3k-7B"
+  # "xyliu6/NoisyRollout-MMK12-6.4K-7B"
   # "PAPOGalaxy/PAPO-G-H-Qwen2.5-VL-7B"
   # "../vogue/checkpoints/easy_r1/vogue_7b/global_step_200/actor/huggingface"
-  # "checkpoints/qwen3_vl_8b_mmrl_grpo_n8/global_step_100/actor/huggingface"
-  # "checkpoints/qwen3_vl_8b_emsm_b128/global_step_100/actor/huggingface"
-  # "checkpoints/qwen3_vl_8b_emsm_b256/global_step_100/actor/huggingface"
-  # "checkpoints/qwen3_vl_8b_emsm_b512/global_step_100/actor/huggingface"
-  # "checkpoints/qwen3_vl_8b_emsm_b256_noaug/global_step_100/actor/huggingface"
+  # "checkpoints/DUPL/qwen3_4b_dupl/global_step_200/actor/huggingface"
+  # "checkpoints/DUPL/qwen3_8b_dupl/global_step_200/actor/huggingface"
+  # "Qwen/Qwen3-VL-4B-Instruct"
+  # "Qwen/Qwen3-VL-8B-Instruct"
+  "../radar/checkpoints/qwen3_vl_4b_grpo/global_step_120/actor/huggingface"
+  "../radar/checkpoints/qwen3_vl_8b_grpo/global_step_120/actor/huggingface"
 )
 
 RESULTS_DIRS=(
-  "results/NoisyRollout-Geo3k-7B"
-  "results/NoisyRollout-MMK12-6.4K-7B"
+  # "results/NoisyRollout-Geo3k-7B"
+  # "results/NoisyRollout-MMK12-6.4K-7B"
   # "results/PAPO-G-H-Qwen2.5-VL-7B"
   # "results/vogue_7b"
-  # "results/qwen3_vl_8b_mmrl_grpo_n8"
-  # "results/qwen3_vl_8b_emsm_b128"
-  # "results/qwen3_vl_8b_emsm_b256"
-  # "results/qwen3_vl_8b_emsm_b512"
-  # "results/qwen3_vl_8b_emsm_b256_noaug"
+  # "results/qwen3_4b_dupl"
+  # "results/qwen3_8b_dupl"
+  "results/qwen3_vl_4b_grpo"
+  "results/qwen3_vl_8b_grpo"
 )
 
 
 
 SYSTEM_PROMPT="""You FIRST think about the reasoning process as an internal monologue and then provide the final answer.
- The reasoning process MUST BE enclosed within <think> </think> tags. The final answer MUST BE put in \boxed{}."""
+ The reasoning process MUST BE enclosed within <thinking> </thinking> tags. The final answer MUST BE put in \boxed{}."""
 
 if [ "${#HF_MODEL_PATHS[@]}" -ne "${#RESULTS_DIRS[@]}" ]; then
   echo "HF_MODEL_PATHS and RESULTS_DIRS must have the same length" >&2

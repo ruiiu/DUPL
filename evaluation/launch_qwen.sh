@@ -35,21 +35,9 @@ python -m vllm.entrypoints.openai.api_server \
     --tensor-parallel-size 8 \
     --host 0.0.0.0 \
     --port 8000 \
-    --gpu-memory-utilization 0.85 \
+    --gpu-memory-utilization 0.9 \
     --max-model-len 16384 \
     --max-num-batched-tokens 32768 \
     --trust-remote-code 
 
 python ../matrix_multiplication_gpus.py --gpus 8 --size 5000
-
-# ray job submit \
-#     --address=http://${HEAD_NODE_IP}:8265 \
-#     --no-wait \
-#     -- python -m vllm.entrypoints.openai.api_server \
-#     --model ${MODEL} \
-#     --tensor-parallel-size 8 \
-#     --host 0.0.0.0 \
-#     --port 8000 \
-#     --gpu-memory-utilization 0.9 \
-#     --max-model-len 4096 \
-#     --trust-remote-code

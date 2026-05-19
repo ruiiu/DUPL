@@ -6,6 +6,7 @@ MODEL_PATH=Qwen/Qwen3-4B  # replace it with your local file path
 
 python3 -m verl.trainer.main \
     config=examples/config.yaml \
+    data.format_prompt=./examples/format_prompt/math_qwen3.jinja \
     data.max_response_length=2048 \
     worker.actor.model.model_path=${MODEL_PATH} \
     worker.actor.model.lora.rank=64 \
