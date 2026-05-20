@@ -227,7 +227,7 @@ class TrainerConfig:
 
     def post_init(self):
         if self.save_checkpoint_path is None:
-            self.save_checkpoint_path = os.path.join("checkpoints", self.project_name, self.experiment_name)
+            self.save_checkpoint_path = os.path.join("checkpoints", self.experiment_name)
 
         self.save_checkpoint_path = os.path.abspath(self.save_checkpoint_path)  # may be not exist
         self.load_checkpoint_path = get_abs_path(self.load_checkpoint_path, prompt="Model checkpoint")

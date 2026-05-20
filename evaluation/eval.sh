@@ -36,8 +36,10 @@ HF_MODEL_PATHS=(
   # "checkpoints/DUPL/qwen3_8b_dupl/global_step_200/actor/huggingface"
   # "Qwen/Qwen3-VL-4B-Instruct"
   # "Qwen/Qwen3-VL-8B-Instruct"
-  "../radar/checkpoints/qwen3_vl_4b_grpo/global_step_120/actor/huggingface"
-  "../radar/checkpoints/qwen3_vl_8b_grpo/global_step_120/actor/huggingface"
+  # "../radar/checkpoints/qwen3_vl_4b_grpo/global_step_120/actor/huggingface"
+  # "../radar/checkpoints/qwen3_vl_8b_grpo/global_step_120/actor/huggingface"
+  "../NoisyRollout/checkpoints/qwen2_5_vl_3b_mmrl30k/global_step_200/actor/huggingface"
+  "lr10260/3b-vogue"
 )
 
 RESULTS_DIRS=(
@@ -47,8 +49,10 @@ RESULTS_DIRS=(
   # "results/vogue_7b"
   # "results/qwen3_4b_dupl"
   # "results/qwen3_8b_dupl"
-  "results/qwen3_vl_4b_grpo"
-  "results/qwen3_vl_8b_grpo"
+  # "results/qwen3_vl_4b_grpo"
+  # "results/qwen3_vl_8b_grpo"
+  "results/noisyrollout_3b"
+  "results/dupl_3b"
 )
 
 
