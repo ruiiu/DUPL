@@ -723,13 +723,13 @@ class RayPPOTrainer:
                             dupl_data = self.actor_rollout_ref_wg.process_dual_path_batch(batch)
                             batch = batch.union(dupl_data)
 
-                            if "visual_uncertainty" in batch.batch:
-                                visual_uncertainty_tensor = batch.batch["visual_uncertainty"]
+                            if "perceptual_uncertainty" in batch.batch:
+                                perceptual_uncertainty_tensor = batch.batch["perceptual_uncertainty"]
                                 metrics.update({
-                                    "dupl/uncertainty_mean": torch.mean(visual_uncertainty_tensor).detach().item(),
-                                    "dupl/uncertainty_max": torch.max(visual_uncertainty_tensor).detach().item(),
-                                    "dupl/uncertainty_min": torch.min(visual_uncertainty_tensor).detach().item(),
-                                    "dupl/uncertainty_std": torch.std(visual_uncertainty_tensor).detach().item(),
+                                    "dupl/uncertainty_mean": torch.mean(perceptual_uncertainty_tensor).detach().item(),
+                                    "dupl/uncertainty_max": torch.max(perceptual_uncertainty_tensor).detach().item(),
+                                    "dupl/uncertainty_min": torch.min(perceptual_uncertainty_tensor).detach().item(),
+                                    "dupl/uncertainty_std": torch.std(perceptual_uncertainty_tensor).detach().item(),
                                 })
 
                 with timer("adv", timing_raw):

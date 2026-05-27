@@ -776,7 +776,7 @@ class FSDPWorker(Worker):
             device = self.fsdp_module.device
 
             use_augmented_branch = dual_path_estimator.sample_branch_for_training()
-            raw_log_probs, aug_log_probs, visual_uncertainty = None, None, None
+            raw_log_probs, aug_log_probs, perceptual_uncertainty = None, None, None
 
             if use_kl_penalty:
                 raw_log_probs = self._get_log_probs_from_current_batch(data)
@@ -785,16 +785,16 @@ class FSDPWorker(Worker):
                 kl_penalty = dual_path_estimator.compute_kl_divergence_penalty(
                     raw_log_probs=raw_log_probs, aug_log_probs=aug_log_probs, response_mask=response_mask,
                 )
-                visual_uncertainty = kl_penalty.sum(dim=1) / (response_mask.sum(dim=1) + 1e-8)
+                perceptual_uncertainty = kl_penalty.sum(dim=1) / (response_mask.sum(dim=1) + 1e-8)
             else:
                 if use_augmented_branch:
                     aug_log_probs = self._get_augmented_log_probs(data, dual_path_estimator)
                 else:
                     raw_log_probs = self._get_log_probs_from_current_batch(data)
-                visual_uncertainty = torch.zeros(batch_size, device=device)
+                perceptual_uncertainty = torch.zeros(batch_size, device=device)
 
             tensors = {
-                "visual_uncertainty": visual_uncertainty,
+                "perceptual_uncertainty": perceptual_uncertainty,
                 "use_augmented_branch": torch.full((batch_size,), use_augmented_branch, dtype=torch.bool, device=device),
             }
             if use_kl_penalty:
@@ -814,8 +814,8 @@ class FSDPWorker(Worker):
                     "dupl_method": "kl_divergence" if use_kl_penalty else "simplified",
                     "current_aug_prob": dual_path_estimator.get_current_aug_probability(),
                     "current_step": current_step,
-                    "visual_uncertainty_mean": visual_uncertainty.mean().item(),
-                    "visual_uncertainty_std": visual_uncertainty.std().item(),
+                    "perceptual_uncertainty_mean": perceptual_uncertainty.mean().item(),
+                    "perceptual_uncertainty_std": perceptual_uncertainty.std().item(),
                 }
             )
         except Exception as e:
@@ -826,7 +826,7 @@ class FSDPWorker(Worker):
             device = self.fsdp_module.device if hasattr(self, 'fsdp_module') else torch.cuda.current_device()
             return DataProto.from_dict(
                 tensors={
-                    "visual_uncertainty": torch.zeros(batch_size, device=device),
+                    "perceptual_uncertainty": torch.zeros(batch_size, device=device),
                     "use_augmented_branch": torch.zeros(batch_size, dtype=torch.bool, device=device),
                 },
                 meta_info={"dupl_error": str(e)}

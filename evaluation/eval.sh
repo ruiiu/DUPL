@@ -20,7 +20,7 @@ MAX_NUM_SEQS=64
 GPU_MEMORY_UTILIZATION=0.9
 PROMPT_WORKERS=16
 JUDGE_MAX_CONCURRENT=256
-OVERWRITE=false  # Set to true to re-run inference/evaluation even if results exist
+OVERWRITE=true  # Set to true to re-run inference/evaluation even if results exist
 
 # ========================
 # Inference Stage:
@@ -38,8 +38,9 @@ HF_MODEL_PATHS=(
   # "Qwen/Qwen3-VL-8B-Instruct"
   # "../radar/checkpoints/qwen3_vl_4b_grpo/global_step_120/actor/huggingface"
   # "../radar/checkpoints/qwen3_vl_8b_grpo/global_step_120/actor/huggingface"
-  "../NoisyRollout/checkpoints/qwen2_5_vl_3b_mmrl30k/global_step_200/actor/huggingface"
-  "lr10260/3b-vogue"
+  # "../NoisyRollout/checkpoints/qwen2_5_vl_3b_mmrl30k/global_step_200/actor/huggingface"
+  "checkpoints/dupl_3b/global_step_200/actor/huggingface"
+  "../NoisyRollout/checkpoints/qwen2_5_vl_7b_mmrl30k/global_step_200/actor/huggingface"
 )
 
 RESULTS_DIRS=(
@@ -51,8 +52,9 @@ RESULTS_DIRS=(
   # "results/qwen3_8b_dupl"
   # "results/qwen3_vl_4b_grpo"
   # "results/qwen3_vl_8b_grpo"
-  "results/noisyrollout_3b"
+  # "results/noisyrollout_3b"
   "results/dupl_3b"
+  "results/noisyrollout_7b"
 )
 
 

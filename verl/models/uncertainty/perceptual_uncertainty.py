@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Visual uncertainty estimation approaches for GRPO training.
+Perceptual uncertainty estimation approaches for GRPO training.
 
-This module provides two approaches for visual uncertainty estimation:
+This module provides two approaches for perceptual uncertainty estimation:
 1. PixelLevelUncertainty: Image augmentation-based uncertainty through variance (based on image_augmentation.py)
 2. DualPathUncertainty: Dual-path processing with KL divergence penalty
 
@@ -19,9 +19,9 @@ import numpy as np
 import math
 
 
-class BaseVisualUncertainty:
+class BasePerceptualUncertainty:
     """
-    Base class for visual uncertainty estimation with shared augmentation functionality.
+    Base class for perceptual uncertainty estimation with shared augmentation functionality.
     """
     
     def __init__(
@@ -35,7 +35,7 @@ class BaseVisualUncertainty:
         final_aug_prob: float = 0.0,
     ):
         """
-        Initialize base visual uncertainty estimator.
+        Initialize base perceptual uncertainty estimator.
         
         Args:
             augmentation_strength: Strength of image augmentations (0.0 to 1.0)
@@ -110,11 +110,11 @@ class BaseVisualUncertainty:
         return augmented_image
 
 
-class PixelLevelUncertainty(BaseVisualUncertainty):
+class PixelLevelUncertainty(BasePerceptualUncertainty):
     """
-    Pixel-level visual uncertainty estimator using image augmentation.
+    Pixel-level perceptual uncertainty estimator using image augmentation.
 
-    This class estimates visual uncertainty by:
+    This class estimates perceptual uncertainty by:
     1. Creating multiple augmented versions of input images
     2. Computing vision encoder embeddings for each version
     3. Calculating variance across embeddings as uncertainty measure
@@ -229,7 +229,7 @@ class PixelLevelUncertainty(BaseVisualUncertainty):
         
         return augmented_batches
     
-    def estimate_visual_uncertainty(
+    def estimate_perceptual_uncertainty(
         self,
         vision_encoder: torch.nn.Module,
         processor,
@@ -237,7 +237,7 @@ class PixelLevelUncertainty(BaseVisualUncertainty):
         device: torch.device,
     ) -> torch.Tensor:
         """
-        Estimate visual uncertainty using image augmentation.
+        Estimate perceptual uncertainty using image augmentation.
         
         Args:
             vision_encoder: Vision encoder model (e.g., Qwen2.5-VL vision tower)
@@ -246,7 +246,7 @@ class PixelLevelUncertainty(BaseVisualUncertainty):
             device: Device to run computation on
             
         Returns:
-            torch.Tensor: Visual uncertainty values, shape [batch_size]
+            torch.Tensor: Perceptual uncertainty values, shape [batch_size]
         """
         uncertainties = []
         
@@ -302,14 +302,14 @@ class PixelLevelUncertainty(BaseVisualUncertainty):
     def apply_noise_to_logits(
         self,
         logits: torch.Tensor,
-        visual_uncertainty: torch.Tensor,
+        perceptual_uncertainty: torch.Tensor,
     ) -> torch.Tensor:
         """
-        Apply controlled Gaussian noise to logits based on visual uncertainty.
+        Apply controlled Gaussian noise to logits based on perceptual uncertainty.
         
         Args:
             logits: Token logits, shape [batch_size, seq_len, vocab_size]
-            visual_uncertainty: Visual uncertainty values, shape [batch_size]
+            perceptual_uncertainty: Perceptual uncertainty values, shape [batch_size]
             
         Returns:
             torch.Tensor: Noisy logits with same shape as input
@@ -318,7 +318,7 @@ class PixelLevelUncertainty(BaseVisualUncertainty):
         
         # Convert uncertainty to noise standard deviation
         noise_std = torch.clamp(
-            visual_uncertainty * self.noise_scaling_factor,
+            perceptual_uncertainty * self.noise_scaling_factor,
             min=self.min_uncertainty,
             max=self.max_uncertainty
         )
@@ -333,9 +333,9 @@ class PixelLevelUncertainty(BaseVisualUncertainty):
         return noisy_logits
 
 
-class DualPathUncertainty(BaseVisualUncertainty):
+class DualPathUncertainty(BasePerceptualUncertainty):
     """
-    Dual-path visual uncertainty estimator using KL divergence penalty.
+    Dual-path perceptual uncertainty estimator using KL divergence penalty.
 
     This class implements a curriculum learning approach with:
     1. Dual-path processing (raw + augmented images)
