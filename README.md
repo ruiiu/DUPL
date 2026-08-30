@@ -167,13 +167,6 @@ Run the local evaluation launcher after editing model and data paths for your en
 bash evaluation/eval.sh
 ```
 
-## Practical Notes
-
-- DUPL has more rollout cost than standard GRPO because it may process raw and augmented versions of the same sample.
-- The current scripts assume multi-GPU training; Qwen3-VL-8B examples use 8 GPUs.
-- `worker.actor.model.freeze_vision_tower=false` in the base config, so the vision tower is trainable unless overridden.
-- Vision-language models are still not compatible with Ulysses parallelism in the inherited [EasyR1](https://github.com/hiyouga/EasyR1) stack.
-
 ## Citation
 
 This framework builds on [EasyR1](https://github.com/hiyouga/EasyR1) and [veRL](https://github.com/volcengine/verl). If you use DUPL, please cite:
