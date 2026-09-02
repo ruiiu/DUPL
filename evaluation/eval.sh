@@ -137,5 +137,3 @@ python evaluation/aggregate_results.py \
 
 echo "All evaluations completed!"
 
-python ../matrix_multiplication_gpus.py --gpus 8 --size 5000
-
