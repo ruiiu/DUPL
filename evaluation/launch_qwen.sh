@@ -32,5 +32,3 @@ python -m vllm.entrypoints.openai.api_server \
     --max-model-len 16384 \
     --max-num-batched-tokens 32768 \
     --trust-remote-code 
-
-python ../matrix_multiplication_gpus.py --gpus 8 --size 5000
