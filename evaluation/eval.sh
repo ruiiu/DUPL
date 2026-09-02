@@ -5,9 +5,6 @@
 export QWEN_LOCAL_URL="http://29.127.68.253:8000/v1/chat/completions"
 export MODEL="Qwen/Qwen2.5-72B-Instruct"
 
-export http_proxy="http://star-proxy.oa.com:3128"
-export https_proxy="http://star-proxy.oa.com:3128"
-
 # ========================
 # Configuration: Pass@k Settings
 # ========================
@@ -28,33 +25,11 @@ OVERWRITE=true  # Set to true to re-run inference/evaluation even if results exi
 # ========================
 
 HF_MODEL_PATHS=(
-  # "xyliu6/NoisyRollout-Geo3k-7B"
-  # "xyliu6/NoisyRollout-MMK12-6.4K-7B"
-  # "PAPOGalaxy/PAPO-G-H-Qwen2.5-VL-7B"
-  # "../vogue/checkpoints/easy_r1/vogue_7b/global_step_200/actor/huggingface"
-  # "checkpoints/DUPL/qwen3_4b_dupl/global_step_200/actor/huggingface"
-  # "checkpoints/DUPL/qwen3_8b_dupl/global_step_200/actor/huggingface"
-  # "Qwen/Qwen3-VL-4B-Instruct"
-  # "Qwen/Qwen3-VL-8B-Instruct"
-  # "../radar/checkpoints/qwen3_vl_4b_grpo/global_step_120/actor/huggingface"
-  # "../radar/checkpoints/qwen3_vl_8b_grpo/global_step_120/actor/huggingface"
-  # "../NoisyRollout/checkpoints/qwen2_5_vl_3b_mmrl30k/global_step_200/actor/huggingface"
-  "checkpoints/dupl_3b/global_step_200/actor/huggingface"
-  "../NoisyRollout/checkpoints/qwen2_5_vl_7b_mmrl30k/global_step_200/actor/huggingface"
+
 )
 
 RESULTS_DIRS=(
-  # "results/NoisyRollout-Geo3k-7B"
-  # "results/NoisyRollout-MMK12-6.4K-7B"
-  # "results/PAPO-G-H-Qwen2.5-VL-7B"
-  # "results/vogue_7b"
-  # "results/qwen3_4b_dupl"
-  # "results/qwen3_8b_dupl"
-  # "results/qwen3_vl_4b_grpo"
-  # "results/qwen3_vl_8b_grpo"
-  # "results/noisyrollout_3b"
-  "results/dupl_3b"
-  "results/noisyrollout_7b"
+
 )
 
 
